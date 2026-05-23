@@ -5,7 +5,7 @@ from rest_framework.generics import GenericAPIView, ListCreateAPIView, RetrieveU
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
-
+from drf_spectacular.utils import extend_schema, OpenApiParameter
 from recipe.models import Recipe
 from .models import Profile
 from recipe.serializers import RecipeSerializer
@@ -123,22 +123,44 @@ class UserBookmarkAPIView(ListCreateAPIView):
     def post(self, request, pk):
         user = User.objects.get(id=pk)
         user_profile = get_object_or_404(self.profile, user=user)
-        recipe = Recipe.objects.get(id=request.data['id'])
+        recipe_id = request.data.get('id')
+        if not recipe_id:
+            return Response({"error": "Missing 'id' parameter"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            recipe = Recipe.objects.get(id=recipe_id)
+        except Recipe.DoesNotExist:
+            return Response({"error": "Recipe not found"}, status=status.HTTP_404_NOT_FOUND)
+            
         if user_profile:
             user_profile.bookmarks.add(recipe)
             return Response(status=status.HTTP_200_OK)
         return Response(status=status.HTTP_400_BAD_REQUEST)
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(name='recipe_id', type=int, location='query', description='ID рецепта для удаления из избранного')
+        ]
+    )
     def delete(self, request, pk):
         user = User.objects.get(id=pk)
         user_profile = get_object_or_404(self.profile, user=user)
-        recipe = Recipe.objects.get(id=request.data['id'])
+        
+        # Берём recipe_id из QUERY параметра (из URL)
+        recipe_id = request.query_params.get('recipe_id')
+        if not recipe_id:
+            return Response({"error": "Missing 'recipe_id' parameter"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            recipe = Recipe.objects.get(id=recipe_id)
+        except Recipe.DoesNotExist:
+            return Response({"error": "Recipe not found"}, status=status.HTTP_404_NOT_FOUND)
+            
         if user_profile:
             user_profile.bookmarks.remove(recipe)
             return Response(status=status.HTTP_200_OK)
         return Response(status=status.HTTP_400_BAD_REQUEST)
-
-
+    
 class PasswordChangeAPIView(UpdateAPIView):
     """
     Change password view for authenticated user
