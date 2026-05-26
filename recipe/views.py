@@ -4,6 +4,8 @@ from django.shortcuts import get_object_or_404
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from django.db.models import Count
+from collections import Counter
+import json
 
 from .models import Recipe, RecipeLike
 from .serializers import RecipeLikeSerializer, RecipeSerializer
@@ -117,3 +119,108 @@ class RecipeLikeAPIView(generics.CreateAPIView):
 
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
+
+class RecipeRecommendationsAPIView(generics.GenericAPIView):
+    """
+    Get personalized recipe recommendations based on user's saved recipes.
+    If user has less than 5 saved recipes, return top liked recipes.
+    If user has 5 or more saved recipes, return recipes with similar ingredients.
+    """
+    permission_classes = (IsAuthenticated,)
+    serializer_class = RecipeSerializer
+
+    def get(self, request, *args, **kwargs):
+        user = request.user
+        saved_recipes = user.profile.bookmarks.all()
+        
+        # Получаем все рецепты, исключая авторские и уже сохраненные
+        available_recipes = Recipe.objects.exclude(
+            id__in=saved_recipes.values_list('id', flat=True)
+        ).exclude(
+            author=user
+        )
+        
+        # Если нет доступных рецептов
+        if not available_recipes.exists():
+            return Response({
+                'recommendations': [],
+                'type': 'empty',
+                'message': 'No recipes available for recommendations',
+                'has_recommendations': False
+            })
+        
+        # Если сохраненных рецептов меньше 5 - возвращаем топ залайканные
+        if saved_recipes.count() < 5:
+            recommended = available_recipes.annotate(
+                likes_count=Count('recipelike')
+            ).order_by('-likes_count')[:5]
+            
+            serializer = self.get_serializer(recommended, many=True)
+            return Response({
+                'recommendations': serializer.data,
+                'type': 'popular',
+                'message': 'Based on popular recipes',
+                'has_recommendations': len(serializer.data) > 0
+            })
+        
+        # Если сохранений 5 и больше - ищем по схожим ингредиентам
+        else:
+            # Собираем все ингредиенты из сохраненных рецептов
+            common_ingredients = Counter()
+            for recipe in saved_recipes:
+                try:
+                    ingredients = json.loads(recipe.ingredients)
+                    for ingredient in ingredients:
+                        common_ingredients[ingredient.lower()] += 1
+                except:
+                    ingredients = recipe.ingredients.lower().split(',')
+                    for ingredient in ingredients:
+                        common_ingredients[ingredient.strip()] += 1
+            
+            # Получаем топ 10 самых частых ингредиентов
+            top_ingredients = [ing for ing, count in common_ingredients.most_common(10)]
+            
+            # Ищем рецепты с похожими ингредиентами
+            recipe_scores = {}
+            
+            for recipe in available_recipes:
+                score = 0
+                try:
+                    ingredients = json.loads(recipe.ingredients)
+                    for ingredient in ingredients:
+                        if ingredient.lower() in top_ingredients:
+                            score += 1
+                except:
+                    ingredients = recipe.ingredients.lower().split(',')
+                    for ingredient in ingredients:
+                        if ingredient.strip() in top_ingredients:
+                            score += 1
+                
+                if score > 0:
+                    recipe_scores[recipe.id] = score
+            
+            # Сортируем по релевантности
+            sorted_recipes = sorted(recipe_scores.items(), key=lambda x: x[1], reverse=True)
+            recommended_ids = [recipe_id for recipe_id, score in sorted_recipes[:5]]
+            
+            # Получаем объекты рецептов
+            recommended_recipes = Recipe.objects.filter(id__in=recommended_ids).annotate(
+                likes_count=Count('recipelike')
+            )
+            
+            # Сортируем в том же порядке
+            ordered_recipes = []
+            for recipe_id in recommended_ids:
+                for recipe in recommended_recipes:
+                    if recipe.id == recipe_id:
+                        ordered_recipes.append(recipe)
+                        break
+            
+            serializer = self.get_serializer(ordered_recipes, many=True)
+            return Response({
+                'recommendations': serializer.data,
+                'type': 'ingredient_based',
+                'message': 'Based on your saved recipes ingredients',
+                'common_ingredients': top_ingredients[:5],
+                'has_recommendations': len(serializer.data) > 0
+            })
