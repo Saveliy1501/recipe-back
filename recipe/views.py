@@ -7,8 +7,8 @@ from django.db.models import Count
 from collections import Counter
 import json
 
-from .models import Recipe, RecipeLike
-from .serializers import RecipeLikeSerializer, RecipeSerializer
+from .models import Recipe, RecipeLike, Comment
+from .serializers import RecipeLikeSerializer, RecipeSerializer, CommentSerializer
 from .permissions import IsAuthorOrReadOnly
 from django.db.models import Q
 
@@ -224,3 +224,47 @@ class RecipeRecommendationsAPIView(generics.GenericAPIView):
                 'common_ingredients': top_ingredients[:5],
                 'has_recommendations': len(serializer.data) > 0
             })
+
+class CommentListCreateAPIView(generics.ListCreateAPIView):
+    """
+    Get all comments for a recipe or create a new comment
+    """
+    serializer_class = CommentSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def get_queryset(self):
+        recipe_id = self.kwargs.get('recipe_id')
+        return Comment.objects.filter(recipe_id=recipe_id)
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+    def perform_create(self, serializer):
+        recipe_id = self.kwargs.get('recipe_id')
+        recipe = get_object_or_404(Recipe, id=recipe_id)
+        serializer.save(author=self.request.user, recipe=recipe)
+
+
+class CommentDeleteAPIView(generics.DestroyAPIView):
+    """
+    Delete a comment (only author or admin)
+    """
+    queryset = Comment.objects.all()
+    serializer_class = CommentSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def get_queryset(self):
+        return Comment.objects.filter(author=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        comment = self.get_object()
+        # Только автор может удалить комментарий
+        if comment.author != request.user:
+            return Response(
+                {"error": "You can only delete your own comments"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        self.perform_destroy(comment)
+        return Response(status=status.HTTP_204_NO_CONTENT)

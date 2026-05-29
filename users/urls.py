@@ -20,4 +20,5 @@ urlpatterns = [
          name='user-bookmark'),
     path('password/change/', views.PasswordChangeAPIView.as_view(),
          name='change-password'),
+     path('sync/', views.UserSyncAPIView.as_view(), name='user-sync'),
 ]

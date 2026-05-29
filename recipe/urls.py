@@ -11,4 +11,6 @@ urlpatterns = [
     path('<int:pk>/like/', views.RecipeLikeAPIView.as_view(),
          name='recipe-like'),
     path('recommendations/', views.RecipeRecommendationsAPIView.as_view(), name='recipe-recommendations'),
+    path('<int:recipe_id>/comments/', views.CommentListCreateAPIView.as_view(), name='recipe-comments'),
+    path('comments/<int:pk>/', views.CommentDeleteAPIView.as_view(), name='comment-delete'),
 ]

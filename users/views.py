@@ -170,3 +170,24 @@ class PasswordChangeAPIView(UpdateAPIView):
 
     def get_object(self):
         return self.request.user
+
+class UserSyncAPIView(GenericAPIView):
+    """
+    Sync user's likes and saved recipes to localStorage
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, *args, **kwargs):
+        user = request.user
+        
+        # Получаем все лайки пользователя
+        from recipe.models import RecipeLike
+        liked_recipes = RecipeLike.objects.filter(user=user).values_list('recipe_id', flat=True)
+        
+        # Получаем все сохраненные рецепты
+        saved_recipes = user.profile.bookmarks.all().values_list('id', flat=True)
+        
+        return Response({
+            'liked_recipes': list(liked_recipes),
+            'saved_recipes': list(saved_recipes)
+        })
